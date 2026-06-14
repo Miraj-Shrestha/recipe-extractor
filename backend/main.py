@@ -27,8 +27,7 @@ app = FastAPI(
 )
 
 # ─── CORS Configuration ───
-# Allow the React frontend (running on localhost:5173) to make requests
-# In production, FRONTEND_URL env var is set to the Vercel deployment URL
+# Allow the React frontend to make requests from local dev and Vercel
 allowed_origins = [
     "http://localhost:5173",   # Vite dev server
     "http://localhost:3000",   # Alternative dev port
@@ -44,6 +43,7 @@ if frontend_url:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=r"https://.*\.vercel\.app",  # Allow all Vercel preview URLs
     allow_credentials=True,
     allow_methods=["*"],       # Allow all HTTP methods
     allow_headers=["*"],       # Allow all headers

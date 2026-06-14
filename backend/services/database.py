@@ -30,6 +30,10 @@ load_dotenv()
 # PostgreSQL connection URL (e.g. postgres://user:pass@host:5432/dbname)
 DATABASE_URL = os.getenv('DATABASE_URL')
 
+# Render gives postgres:// but psycopg2 requires postgresql://
+if DATABASE_URL and DATABASE_URL.startswith('postgres://'):
+    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+
 
 def get_connection():
     """Create and return a database connection with RealDictCursor."""
