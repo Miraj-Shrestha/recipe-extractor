@@ -1,40 +1,14 @@
 """
 scraper.py — Web scraping service for extracting text content from recipe URLs.
 
-Uses requests to fetch the HTML and BeautifulSoup to parse it.
-Strips out non-content elements (scripts, styles, nav, ads, footers)
-to give the AI only the relevant recipe text to work with.
-
-If direct scraping fails (sites block cloud IPs), falls back to a
-free proxy service to fetch the page.
+Uses cloudscraper to bypass Cloudflare anti-bot protection,
+then BeautifulSoup to parse and clean the HTML.
+Falls back to free proxy services if direct scraping fails.
 """
 
-import requests
+import cloudscraper
 from bs4 import BeautifulSoup
-from urllib.parse import quote
 
-
-# Headers to mimic a real Chrome browser (many recipe sites block basic scrapers)
-HEADERS = {
-    'User-Agent': (
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-        'AppleWebKit/537.36 (KHTML, like Gecko) '
-        'Chrome/126.0.0.0 Safari/537.36'
-    ),
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Cache-Control': 'no-cache',
-    'Pragma': 'no-cache',
-    'Sec-Ch-Ua': '"Chromium";v="126", "Google Chrome";v="126", "Not-A.Brand";v="8"',
-    'Sec-Ch-Ua-Mobile': '?0',
-    'Sec-Ch-Ua-Platform': '"Windows"',
-    'Sec-Fetch-Dest': 'document',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'none',
-    'Sec-Fetch-User': '?1',
-    'Upgrade-Insecure-Requests': '1',
-}
 
 # HTML tags that contain non-content elements we want to remove
 TAGS_TO_REMOVE = [
@@ -49,18 +23,11 @@ AD_PATTERNS = [
     'related-post', 'recommended', 'promo',
 ]
 
-# Free proxy services to try when direct scraping is blocked
-PROXY_URLS = [
-    "https://api.allorigins.win/raw?url={}",
-    "https://api.codetabs.com/v1/proxy?quest={}",
-]
-
 
 def _fetch_html(url: str) -> str:
     """
-    Fetch the HTML content of a URL.
-    Tries direct request first, then falls back to proxy services
-    if the site blocks cloud server IPs.
+    Fetch the HTML content of a URL using cloudscraper.
+    Bypasses Cloudflare and most anti-bot protections.
 
     Args:
         url: The full URL to fetch
@@ -69,38 +36,17 @@ def _fetch_html(url: str) -> str:
         Raw HTML string
 
     Raises:
-        ValueError: If all methods fail
+        ValueError: If the page can't be fetched
     """
-    # Attempt 1: Direct request
     try:
-        response = requests.get(url, headers=HEADERS, timeout=15)
+        scraper = cloudscraper.create_scraper(
+            browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False}
+        )
+        response = scraper.get(url, timeout=20)
         response.raise_for_status()
         return response.text
-    except requests.exceptions.MissingSchema:
-        raise ValueError(f"Invalid URL format: {url}")
-    except requests.exceptions.ConnectionError:
-        pass  # Try proxy fallback
-    except requests.exceptions.Timeout:
-        pass  # Try proxy fallback
-    except requests.exceptions.HTTPError:
-        pass  # Try proxy fallback
-
-    # Attempt 2: Try proxy services as fallback
-    encoded_url = quote(url, safe='')
-    for proxy_template in PROXY_URLS:
-        try:
-            proxy_url = proxy_template.format(encoded_url)
-            response = requests.get(proxy_url, timeout=20)
-            response.raise_for_status()
-            if len(response.text) > 100:  # Sanity check
-                return response.text
-        except Exception:
-            continue
-
-    raise ValueError(
-        f"Could not fetch the recipe page. The site may be blocking automated requests. "
-        f"URL: {url}"
-    )
+    except Exception as e:
+        raise ValueError(f"Could not fetch the recipe page: {str(e)}. URL: {url}")
 
 
 def _clean_html(html: str) -> str:
