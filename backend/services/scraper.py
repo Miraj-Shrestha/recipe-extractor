@@ -4,10 +4,14 @@ scraper.py — Web scraping service for extracting text content from recipe URLs
 Uses requests to fetch the HTML and BeautifulSoup to parse it.
 Strips out non-content elements (scripts, styles, nav, ads, footers)
 to give the AI only the relevant recipe text to work with.
+
+If direct scraping fails (sites block cloud IPs), falls back to a
+free proxy service to fetch the page.
 """
 
 import requests
 from bs4 import BeautifulSoup
+from urllib.parse import quote
 
 
 # Headers to mimic a real Chrome browser (many recipe sites block basic scrapers)
@@ -45,35 +49,72 @@ AD_PATTERNS = [
     'related-post', 'recommended', 'promo',
 ]
 
+# Free proxy services to try when direct scraping is blocked
+PROXY_URLS = [
+    "https://api.allorigins.win/raw?url={}",
+    "https://api.codetabs.com/v1/proxy?quest={}",
+]
 
-def scrape_url(url: str) -> str:
+
+def _fetch_html(url: str) -> str:
     """
-    Scrape a recipe URL and return the cleaned text content.
+    Fetch the HTML content of a URL.
+    Tries direct request first, then falls back to proxy services
+    if the site blocks cloud server IPs.
 
     Args:
-        url: The full URL of the recipe page
+        url: The full URL to fetch
 
     Returns:
-        Cleaned text content of the page, ready for AI extraction
+        Raw HTML string
 
     Raises:
-        ValueError: If the URL is invalid or the page can't be fetched
+        ValueError: If all methods fail
     """
+    # Attempt 1: Direct request
     try:
-        # Fetch the page HTML
         response = requests.get(url, headers=HEADERS, timeout=15)
         response.raise_for_status()
+        return response.text
     except requests.exceptions.MissingSchema:
         raise ValueError(f"Invalid URL format: {url}")
     except requests.exceptions.ConnectionError:
-        raise ValueError(f"Could not connect to: {url}")
+        pass  # Try proxy fallback
     except requests.exceptions.Timeout:
-        raise ValueError(f"Request timed out for: {url}")
-    except requests.exceptions.HTTPError as e:
-        raise ValueError(f"HTTP error {e.response.status_code} for: {url}")
+        pass  # Try proxy fallback
+    except requests.exceptions.HTTPError:
+        pass  # Try proxy fallback
 
+    # Attempt 2: Try proxy services as fallback
+    encoded_url = quote(url, safe='')
+    for proxy_template in PROXY_URLS:
+        try:
+            proxy_url = proxy_template.format(encoded_url)
+            response = requests.get(proxy_url, timeout=20)
+            response.raise_for_status()
+            if len(response.text) > 100:  # Sanity check
+                return response.text
+        except Exception:
+            continue
+
+    raise ValueError(
+        f"Could not fetch the recipe page. The site may be blocking automated requests. "
+        f"URL: {url}"
+    )
+
+
+def _clean_html(html: str) -> str:
+    """
+    Parse HTML and extract clean text content suitable for AI extraction.
+
+    Args:
+        html: Raw HTML string
+
+    Returns:
+        Cleaned text content
+    """
     # Parse the HTML
-    soup = BeautifulSoup(response.text, 'html.parser')
+    soup = BeautifulSoup(html, 'html.parser')
 
     # Remove non-content tags
     for tag_name in TAGS_TO_REMOVE:
@@ -107,9 +148,26 @@ def scrape_url(url: str) -> str:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     cleaned_text = '\n'.join(lines)
 
-    # Truncate if too long (Gemini has a context window limit)
+    # Truncate if too long (LLMs have context window limits)
     max_chars = 15000
     if len(cleaned_text) > max_chars:
         cleaned_text = cleaned_text[:max_chars] + '\n\n[Content truncated...]'
 
     return cleaned_text
+
+
+def scrape_url(url: str) -> str:
+    """
+    Scrape a recipe URL and return the cleaned text content.
+
+    Args:
+        url: The full URL of the recipe page
+
+    Returns:
+        Cleaned text content of the page, ready for AI extraction
+
+    Raises:
+        ValueError: If the URL is invalid or the page can't be fetched
+    """
+    html = _fetch_html(url)
+    return _clean_html(html)
