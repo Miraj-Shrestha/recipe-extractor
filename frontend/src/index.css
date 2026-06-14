@@ -1,0 +1,19 @@
+/*
+ * index.css — Global reset styles
+ * These styles apply to the entire page and remove browser defaults.
+ */
+
+/* Reset default margins and paddings for all elements */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* Base body styling */
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background-color: #f0f2f5;
+  color: #333;
+  line-height: 1.6;
+}
